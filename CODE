@@ -1,0 +1,119 @@
+reddit-summary-bot/
+│
+├── bot.py
+├── summarizer.py
+├── config.py
+├── requirements.txt
+
+
+
+# bot.py
+
+import praw
+import time
+from config import CLIENT_ID, CLIENT_SECRET, USERNAME, PASSWORD, USER_AGENT, BOT_USERNAME
+from summarizer import simple_summarize
+
+
+def create_reddit_instance():
+    return praw.Reddit(
+        client_id=CLIENT_ID,
+        client_secret=CLIENT_SECRET,
+        username=USERNAME,
+        password=PASSWORD,
+        user_agent=USER_AGENT
+    )
+
+
+def get_thread_text(submission):
+    """
+    Collect the text of the post (title + selftext) plus all visible comments.
+    """
+    text = submission.title + "\n\n" + (submission.selftext or "")
+
+    # Expand all comments
+    submission.comments.replace_more(limit=0)
+
+    # Concatenate all comment bodies
+    for comment in submission.comments.list():
+        if isinstance(comment.body, str):
+            text += "\n" + comment.body
+
+    return text
+
+
+def run_bot():
+    reddit = create_reddit_instance()
+    print("Bot started. Listening for mentions...")
+
+    for mention in reddit.inbox.stream():
+        try:
+            # Only act on new mentions of the bot
+            if not mention.new:
+                continue
+
+            if BOT_USERNAME.lower() in mention.body.lower():
+                print(f"Trigger detected: {mention.body}")
+
+                # Find the thread in which the bot was mentioned
+                submission = mention.submission
+
+                # Fetch + summarize content
+                thread_text = get_thread_text(submission)
+                summary = simple_summarize(thread_text)
+
+                # Compose reply
+                reply_text = (
+                    f"Here is a quick summary of this thread:\n\n"
+                    f"---\n\n"
+                    f"{summary}\n\n"
+                    f"---\n\n"
+                    f"*I'm a bot. I summarize the thread only when I'm mentioned.*"
+                )
+
+                # Reply to the mention
+                mention.reply(reply_text)
+                print("Summary posted.")
+
+                # Mark the mention as read
+                mention.mark_read()
+
+        except Exception as e:
+            print("Error:", e)
+            time.sleep(10)
+
+
+if __name__ == "__main__":
+    run_bot()
+
+
+# summarizer.py
+
+def simple_summarize(text, max_sentences=5):
+    """
+    A simple sentence-based summary generator.
+    It selects the first few meaningful sentences from the thread text.
+    This is intentionally simple to comply with Reddit Developer Policies.
+    """
+    if not text:
+        return "No content available to summarize."
+
+    # Split on '.', keep non-empty sentences
+    sentences = [s.strip() for s in text.split(".") if len(s.strip()) > 10]
+
+    if not sentences:
+        return "Unable to generate a summary from the thread content."
+
+    # Limit the number of sentences returned
+    summary = ". ".join(sentences[:max_sentences])
+    return summary
+
+# config.py
+CLIENT_ID = ""
+CLIENT_SECRET = ""
+USERNAME = ""
+PASSWORD = ""
+USER_AGENT = ""
+BOT_USERNAME = ""
+
+praw==7.7.1
